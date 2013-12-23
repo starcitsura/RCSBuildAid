@@ -25,14 +25,14 @@ namespace RCSBuildAid
     public enum DisplayMode { none, RCS, Engine };
     public enum CoMReference { CoM, DCoM };
 
-    [KSPAddon(KSPAddon.Startup.EditorAny, false)]
-    public class RCSBuildAid : MonoBehaviour
-    {
+	[KSPAddon(KSPAddon.Startup.EditorAny, false)]
+	public class RCSBuildAid : MonoBehaviour
+	{
         enum Directions { none, right, up, fwd, left, down, back };
 
         static Directions direction;
-        static Dictionary<Directions, Vector3> normals
-                = new Dictionary<Directions, Vector3>() {
+		static Dictionary<Directions, Vector3> normals
+				= new Dictionary<Directions, Vector3>() {
             { Directions.none,  Vector3.zero         },
             { Directions.right, Vector3.right   * -1 },
             { Directions.up,    Vector3.forward      },
@@ -40,7 +40,7 @@ namespace RCSBuildAid
             { Directions.left,  Vector3.right        },
             { Directions.down,  Vector3.forward * -1 },
             { Directions.back,  Vector3.up           }
-        };
+		};
         static Dictionary<CoMReference, GameObject> referenceDict = 
             new Dictionary<CoMReference, GameObject> ();
 
@@ -103,26 +103,23 @@ namespace RCSBuildAid
         }
 
         public static bool showDCoM {
-            get { return DCoM.renderer.enabled; }
-            set { showMarker (CoMReference.DCoM, value); }
+            get { return DCoM.activeSelf; }
+            set { DCoM.SetActive (value); }
         }
 
         public static bool showCoM {
             get { return CoM.renderer.enabled; }
-            set { showMarker(CoMReference.CoM, value); }
-        }
-
-        static void showMarker (CoMReference marker, bool value)
-        {
-            GameObject markerObj = referenceDict[marker];
-            markerObj.renderer.enabled = value;
-            CoMVectors comv = markerObj.GetComponent<CoMVectors> ();
-            if (value) {
-                if (reference == marker) {
-                    comv.enabled = true;
+            set {
+                /* we can't disable the whole CoM for now */
+                CoM.renderer.enabled = value;
+                CoMVectors comv = CoM.GetComponent<CoMVectors> ();
+                if (value) {
+                    if (reference == CoMReference.CoM) {
+                        comv.enabled = true;
+                    }
+                } else {
+                    comv.enabled = false;
                 }
-            } else {
-                comv.enabled = false;
             }
         }
 
@@ -140,26 +137,19 @@ namespace RCSBuildAid
         void Awake ()
         {
             Settings.LoadConfig ();
-            Load ();
 
+            gameObject.AddComponent<Window> ();
             direction = Directions.right;
             RCSlist = new List<PartModule> ();
             EngineList = new List<PartModule> ();
-
-            gameObject.AddComponent<Window> ();
             vesselOverlays = (EditorVesselOverlays)GameObject.FindObjectOfType(
                 typeof(EditorVesselOverlays));
-        }
-
-        void Load ()
-        {
-            reference = (CoMReference)Settings.GetValue("com_reference", 0);
-            rcsMode = (RCSMode)Settings.GetValue ("rcs_mode", 0);
+            Load ();
         }
 
         void Start ()
         {
-            setupMarker (); /* must be in Start because CoMmarker is null in Awake */
+            setupMarker ();
         }
 
         void setupMarker ()
@@ -173,25 +163,20 @@ namespace RCSBuildAid
             /* init DCoM */
             DCoM = (GameObject)UnityEngine.Object.Instantiate (CoM);
             DCoM.name = "DCoM Marker";
-            if (DCoM.transform.GetChildCount () > 0) {
+            if (DCoM.transform.childCount > 0) {
                 /* Stock CoM doesn't have any attached objects, if there's some it means
                  * there's a plugin doing the same thing as us. We don't want extra
                  * objects */
-                for (int i = 0; i < DCoM.transform.GetChildCount(); i++) {
+                for (int i = 0; i < DCoM.transform.childCount; i++) {
                     Destroy (DCoM.transform.GetChild (i).gameObject);
                 }
             }
             DCoM.transform.localScale = Vector3.one * 0.9f;
             DCoM.renderer.material.color = Color.red;
-            Destroy (DCoM.GetComponent<EditorMarker_CoM> ());           /* we don't need this */
-            DCoM_Marker dcomMarker = DCoM.AddComponent<DCoM_Marker> (); /* we do need this    */
-            dcomMarker.posMarkerObject = DCoM;
-
-            /* replace stock CoM component with our own */
-            CoM_Marker comMarker = CoM.AddComponent<CoM_Marker> ();
-            comMarker.posMarkerObject = vesselOverlays.CoMmarker.posMarkerObject;
-            Destroy (vesselOverlays.CoMmarker);
-            vesselOverlays.CoMmarker = comMarker;
+            DCoM.transform.parent = CoM.transform;
+            DCoM.SetActive(true); /* needed, CoM wasn't active when it was clonned */
+            Destroy (DCoM.GetComponent<EditorMarker_CoM> ()); /* we don't need this */
+            DCoM.AddComponent<DryCoM_Marker> ();              /* we do need this    */
 
             CoM.AddComponent<CoMVectors> ();
             DCoM.AddComponent<CoMVectors> ();
@@ -199,10 +184,10 @@ namespace RCSBuildAid
             referenceDict[CoMReference.DCoM] = DCoM;
         }
 
-        void OnDestroy ()
+        void Load ()
         {
-            Save ();
-            Settings.SaveConfig();
+            reference = (CoMReference)Settings.GetValue("com_reference", 0);
+            rcsMode = (RCSMode)Settings.GetValue ("rcs_mode", 0);
         }
 
         void Save ()
@@ -211,9 +196,14 @@ namespace RCSBuildAid
             Settings.SetValue ("rcs_mode", (int)rcsMode);
         }
 
-        void Update ()
+        void OnDestroy ()
         {
-            DCoM.SetActive(CoM.activeInHierarchy);
+            Save ();
+            Settings.SaveConfig();
+        }
+
+		void Update ()
+        {
             if (CoM.activeInHierarchy) {
                 switch(mode) {
                 case DisplayMode.RCS:
@@ -408,12 +398,6 @@ namespace RCSBuildAid
                 print (String.Format ("VectorGraphic: {0}", getCount (typeof(VectorGraphic))));
                 print (String.Format ("TorqueGraphic: {0}", getCount (typeof(TorqueGraphic))));
                 print (String.Format ("LineRenderer: {0}", getCount (typeof(LineRenderer))));
-
-                print (String.Format ("Launch mass: {0}", CoM_Marker.Mass));
-                print (String.Format ("Dry mass: {0}", DCoM_Marker.Mass));
-                foreach (KeyValuePair<string, float> res in DCoM_Marker.Resource) {
-                    print (String.Format("  {0}: {1}", res.Key, res.Value));
-                }
             }
         }
 	}

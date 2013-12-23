@@ -23,7 +23,7 @@ namespace RCSBuildAid
 {
     public class Window : MonoBehaviour
     {
-        enum WinState { none, RCS, Engine, Mass };
+        enum WinState { none, RCS, Engine, Markers };
 
         int winID;
         Rect winRect;
@@ -35,7 +35,7 @@ namespace RCSBuildAid
         int winWidth = 178;
         /* windows height for each WinState
          * 26 + rows*25 */
-        int[] winHeight = { 51, 139, 114, 174 };
+        int[] winHeight = { 51, 151, 126, 258 };
 
         void Awake ()
         {
@@ -63,7 +63,7 @@ namespace RCSBuildAid
 
             /* check if within screen */
             winRect.x = Mathf.Clamp (winRect.x, 0, Screen.width - winWidth);
-            winRect.y = Mathf.Clamp (winRect.y, 0, Screen.height - winHeight[(int)WinState.Mass]);
+            winRect.y = Mathf.Clamp (winRect.y, 0, Screen.height - winHeight[(int)WinState.Markers]);
         }
 
         void Save ()
@@ -75,11 +75,6 @@ namespace RCSBuildAid
 
         void OnGUI ()
         {
-            /* style */
-            GUI.skin.label.padding = new RectOffset();
-            GUI.skin.toggle.padding = new RectOffset(15, 0, 0, 0);
-            GUI.skin.toggle.overflow = new RectOffset(0, 0, -1, 0);
-
             if (RCSBuildAid.Enabled) {
                 if (minimized) {
                     winRect = GUI.Window (winID, winRect, drawWindowMinimized, title);
@@ -133,7 +128,7 @@ namespace RCSBuildAid
             case WinState.Engine:
                 drawEngineMenu();
                 break;
-            case WinState.Mass:
+            case WinState.Markers:
                 drawDCoMMenu();
                 break;
             }
@@ -159,7 +154,7 @@ namespace RCSBuildAid
         void checkDisplayMode ()
         {
             switch (state) {
-            case WinState.Mass:
+            case WinState.Markers:
                 break;
             default:
                 switch(RCSBuildAid.mode) {
@@ -215,74 +210,44 @@ namespace RCSBuildAid
         {
             bool com = RCSBuildAid.showCoM;
             bool dcom = RCSBuildAid.showDCoM;
-            Vector3 offset = RCSBuildAid.CoM.transform.position
-                - RCSBuildAid.DCoM.transform.position;
 
-            /* data */
+            /* DCoM options */
             GUILayout.BeginVertical (GUI.skin.box);
-            {
-                GUILayout.BeginHorizontal ();
-                {
-                    GUILayout.BeginVertical ();
-                    {
-                        GUILayout.Label ("Launch mass:");
-                        GUILayout.Label ("Dry mass:");
-                        GUILayout.Label ("DCoM offset:");
-                    }
-                    GUILayout.EndVertical ();
-                    GUILayout.BeginVertical ();
-                    {
-                        GUILayout.Label (String.Format ("{0:F2} t", CoM_Marker.Mass));
-                        GUILayout.Label (String.Format ("{0:F2} t", DCoM_Marker.Mass));
-                        GUILayout.Label (String.Format ("{0:F2} m", offset.magnitude));
-                    }
-                    GUILayout.EndVertical ();
-                }
-                GUILayout.EndHorizontal ();
-            }
-            GUILayout.EndVertical ();
+            GUILayout.BeginHorizontal ();
+            GUILayout.Label ("DCoM");
+            dcom = GUILayout.Toggle (dcom, "Show");
+            GUILayout.EndHorizontal ();
+            if (dcom) {
+                bool mono = DryCoM_Marker.monoprop;
+                bool fuel = DryCoM_Marker.fuel;
+                bool solid = DryCoM_Marker.solid;
+                bool other = DryCoM_Marker.other;
+                Vector3 offset = RCSBuildAid.CoM.transform.position
+                                 - RCSBuildAid.DCoM.transform.position;
 
-            /* markers toggles */
-            GUILayout.BeginVertical (GUI.skin.box);
-            {
-                GUILayout.BeginHorizontal ();
-                {
-                    com = GUILayout.Toggle (com, "CoM");
-                    dcom = GUILayout.Toggle (dcom, "DCoM");
-                }
-                GUILayout.EndHorizontal ();
-            }
-            GUILayout.EndVertical ();
+                GUILayout.Label (String.Format ("Dry mass: {0:F2} t", DryCoM_Marker.dryMass));
+                GUILayout.Label (String.Format ("CoM offset: {0:F2} m", offset.magnitude));
+                mono = GUILayout.Toggle (mono, "monopropellant");
+                fuel = GUILayout.Toggle (fuel, "liquid fuel/oxidizer");
+                solid = GUILayout.Toggle (solid, "solid fuel");
+                other = GUILayout.Toggle (other, "other resources");
 
-            /* resources */
-            GUILayout.BeginVertical ("Resources", GUI.skin.box);
-            {
-                GUILayout.Space(GUI.skin.box.lineHeight + 4);
-                /* adjust window height */
-                int rows = DCoM_Marker.Resource.Count;
-                if (rows > 0) { 
-                    winRect.height += 15 * rows + 4 * (rows - 1);
-                }
-                GUILayout.BeginHorizontal ();
-                {
-                    GUILayout.BeginVertical ();
-                    {
-                        foreach (string res in DCoM_Marker.Resource.Keys) {
-                            DCoM_Marker.resourceCfg [res] = 
-                                    GUILayout.Toggle (DCoM_Marker.resourceCfg [res], res);
-                        }
-                    }
-                    GUILayout.EndVertical ();
-                    GUILayout.BeginVertical ();
-                    {
-                        foreach (float mass in DCoM_Marker.Resource.Values) {
-                            GUILayout.Label (String.Format ("{0:F2} t", mass));
-                        }
-                    }
-                    GUILayout.EndVertical ();
-                }
-                GUILayout.EndHorizontal ();
+                DryCoM_Marker.monoprop = mono;
+                DryCoM_Marker.fuel = fuel;
+                DryCoM_Marker.oxidizer = fuel;
+                DryCoM_Marker.solid = solid;
+                DryCoM_Marker.other = other;
+            } else {
+                winRect.height = 117;
             }
+            GUILayout.EndVertical();
+
+            /* CoM options */
+            GUILayout.BeginVertical(GUI.skin.box);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("CoM");
+            com = GUILayout.Toggle(com, "Show");
+            GUILayout.EndHorizontal();
             GUILayout.EndVertical();
 
             RCSBuildAid.showCoM = com;
@@ -333,14 +298,14 @@ namespace RCSBuildAid
                 bool mouseOver = isMouseOver ();
                 if (mouseOver && !EditorLogic.softLock && !softLock) {
                     softLock = true;
-                    EditorLogic.SetSoftLock (true);
+					EditorLogic.softLock = true;
                 } else if (!mouseOver && EditorLogic.softLock && softLock) {
                     softLock = false;
-                    EditorLogic.SetSoftLock (false);
+					EditorLogic.softLock = false;
                 }
             } else if (softLock && EditorLogic.softLock) {
                 softLock = false;
-                EditorLogic.SetSoftLock (false);
+				EditorLogic.softLock = false;
             }
         }
 
@@ -348,11 +313,14 @@ namespace RCSBuildAid
          * Debug stuff
          */
 
+        Rect _oldRect;
+
         [Conditional("DEBUG")]
         void debug ()
         {
-            if (Input.GetKeyDown(KeyCode.Space)) {
+            if (_oldRect != winRect) {
                 print (winRect.ToString ());
+                _oldRect = winRect;
             }
         }
 

@@ -20,123 +20,174 @@ using UnityEngine;
 
 namespace RCSBuildAid
 {
-    public abstract class MassEditorMarker : EditorMarker_CoM
+    /* Component for calculate and show forces in CoM */
+    public class CoMVectors : MonoBehaviour
     {
-        protected Vector3 vectorSum;
-        protected float totalMass;
+        VectorGraphic transVector;
+        TorqueGraphic torqueCircle;
+        float threshold = 0.05f;
+        Vector3 torque = Vector3.zero;
+        Vector3 translation = Vector3.zero;
 
-        static HashSet<int> nonPhysicsModules = new HashSet<int> {
-            "ModuleLandingGear".GetHashCode(),
-            "LaunchClamp".GetHashCode(),
-        };
+        public float valueTorque {
+            get { return torqueCircle.value.magnitude; }
+        }
 
-        protected override Vector3 UpdatePosition ()
-        {
-            vectorSum = Vector3.zero;
-            totalMass = 0f;
+        public float valueTranslation {
+            get { return transVector.value.magnitude; }
+        }
 
-            if (EditorLogic.startPod == null) {
-                return Vector3.zero;
+        public new bool enabled {
+            get { return base.enabled; }
+            set { 
+                base.enabled = value;
+                transVector.gameObject.SetActive (value);
+                torqueCircle.gameObject.SetActive (value);
             }
+        }
 
-            recursePart (EditorLogic.startPod);
-            if (EditorLogic.SelectedPart != null) {
-                Part part = EditorLogic.SelectedPart;
-                if (part.potentialParent != null) {
-                    recursePart (part);
+        void Awake ()
+        {
+            /* layer change must be done before adding the Graphic components */
+            GameObject obj = new GameObject ("Translation Vector Object");
+            obj.layer = gameObject.layer;
+            obj.transform.parent = transform;
+            obj.transform.localPosition = Vector3.zero;
 
-                    List<Part>.Enumerator enm = part.symmetryCounterparts.GetEnumerator();
-                    while (enm.MoveNext()) {
-                        recursePart (enm.Current);
-                    }
+            transVector = obj.AddComponent<VectorGraphic> ();
+            transVector.width = 0.15f;
+            transVector.color = Color.green;
+            transVector.offset = 0.6f;
+            transVector.maxLength = 3f;
+
+            obj = new GameObject ("Torque Circle Object");
+            obj.layer = gameObject.layer;
+            obj.transform.parent = transform;
+            obj.transform.localPosition = Vector3.zero;
+
+            torqueCircle = obj.AddComponent<TorqueGraphic> ();
+        }
+
+        void Start ()
+        {
+            if (RCSBuildAid.Reference == gameObject) {
+                /* we should start enabled */
+                enabled = true;
+            } else {
+                enabled = false;
+            }
+        }
+
+        Vector3 calcTorque (Transform transform, Vector3 force)
+        {
+            Vector3 lever = transform.position - this.transform.position;
+            return Vector3.Cross (lever, force);
+        }
+
+        void sumForces<T> (List<PartModule> moduleList) where T : ModuleForces
+        {
+            foreach (PartModule mod in moduleList) {
+                if (mod == null) {
+                    continue;
+                }
+                ModuleForces mf = mod.GetComponent<T> ();
+                if (mf == null || !mf.enabled) {
+                    continue;
+                }
+                for (int t = 0; t < mf.vectors.Length; t++) {
+                    Vector3 force = mf.vectors [t].value;
+                    translation -= force;
+                    torque += calcTorque (mf.vectors [t].transform, force);
                 }
             }
-
-            return vectorSum / totalMass;
         }
 
-        void recursePart (Part part)
+        void LateUpdate ()
         {
-            if (physicalSignificance(part)){
-                calculateCoM(part);
-            }
-           
-            List<Part>.Enumerator enm = part.children.GetEnumerator();
-            while (enm.MoveNext()) {
-                recursePart (enm.Current);
-            }
-        }
+            /* calculate torque, translation and display them */
+            torque = Vector3.zero;
+            translation = Vector3.zero;
 
-        bool physicalSignificance (Part part)
-        {
-            if (part.physicalSignificance == Part.PhysicalSignificance.FULL) {
-                IEnumerator<PartModule> enm = (IEnumerator<PartModule>)part.Modules.GetEnumerator ();
-                while (enm.MoveNext()) {
-                    PartModule mod = enm.Current;
-                    if (nonPhysicsModules.Contains (mod.ClassID)) {
-                        return false;
-                    }
+            switch(RCSBuildAid.mode) {
+            case DisplayMode.RCS:
+                sumForces<RCSForce> (RCSBuildAid.RCSlist);
+                if (RCSBuildAid.rcsMode == RCSMode.ROTATION) {
+                    /* rotation mode, we want to reduce translation */
+                    torqueCircle.valueTarget = RCSBuildAid.Normal * -1;
+                    transVector.valueTarget = Vector3.zero;
+                } else {
+                    /* translation mode, we want to reduce torque */
+                    transVector.valueTarget = RCSBuildAid.Normal * -1;
+                    torqueCircle.valueTarget = Vector3.zero;
                 }
-                return true;
+                break;
+            case DisplayMode.Engine:
+                sumForces<EngineForce> (RCSBuildAid.EngineList);
+                torqueCircle.valueTarget = Vector3.zero;
+                transVector.valueTarget = Vector3.zero;
+                break;
             }
-            return false;
-        }
 
-        protected abstract void calculateCoM (Part part);
-    }
+            /* update vectors in CoM */
+            torqueCircle.value = torque;
+            transVector.value = translation;
 
-    public class CoM_Marker : MassEditorMarker
-    {
-        static CoM_Marker instance;
+            torqueCircle.enabled = (torque.magnitude > threshold) ? true : false;
+            transVector.enabled = (translation.magnitude > threshold) ? true : false;
 
-        public static float Mass {
-            get { return instance.totalMass; }
-        }
-
-        public CoM_Marker ()
-        {
-            instance = this;
-        }
-
-        protected override void calculateCoM (Part part)
-        {
-            float mass = part.mass + part.GetResourceMass ();
-
-            vectorSum += (part.transform.position 
-                + part.transform.rotation * part.CoMOffset)
-                * mass;
-            totalMass += mass;
+            if (torque != Vector3.zero) {
+                torqueCircle.transform.rotation = Quaternion.LookRotation (torque, translation);
+            }
         }
     }
 
-    public class DCoM_Marker : MassEditorMarker
+    public class DryCoM_Marker : MonoBehaviour
     {
-        static DCoM_Marker instance;
-        static Dictionary<string, float> resourceMass = new Dictionary<string, float> ();
+        Vector3 DCoM_position;
+        float partMass;
 
-        public static Dictionary<string, bool> resourceCfg = new Dictionary<string, bool> ();
+        static int fuelID = "LiquidFuel".GetHashCode ();
+        static int oxiID = "Oxidizer".GetHashCode ();
+        static int monoID = "MonoPropellant".GetHashCode ();
+        static int solidID = "SolidFuel".GetHashCode ();
+        static Dictionary<int, bool> resources = new Dictionary<int, bool> ();
 
-        public static Dictionary<string, float> Resource {
-            get { return resourceMass; }
+        public static bool other;
+
+        public static bool fuel {
+            get { return resources [fuelID]; } 
+            set { resources [fuelID] = value; }
         }
 
-        public static float Mass {
-            get { return instance.totalMass; }
+        public static bool solid {
+            get { return resources [solidID]; } 
+            set { resources [solidID] = value; }
         }
 
-        public DCoM_Marker ()
+        public static bool oxidizer {
+            get { return resources [oxiID]; }
+            set { resources [oxiID] = value; }
+        }
+
+        public static bool monoprop {
+            get { return resources [monoID]; }
+            set { resources [monoID] = value; }
+        }
+
+        public static float dryMass { get; private set; }
+
+        void Awake ()
         {
-            instance = this;
             Load ();
         }
 
         void Load ()
         {
-            /* for these resources, default to false */
-            string[] L = new string[] { "LiquidFuel", "Oxidizer", "SolidFuel" };
-            foreach (string name in L) {
-                resourceCfg [name] = Settings.GetValue ("drycom_" + name, false);
-            }
+            DryCoM_Marker.other = Settings.GetValue("drycom_other", true);
+            DryCoM_Marker.fuel = Settings.GetValue("drycom_fuel", false);
+            DryCoM_Marker.monoprop = Settings.GetValue("drycom_mono", false);
+            DryCoM_Marker.oxidizer = DryCoM_Marker.fuel;
+            DryCoM_Marker.solid = Settings.GetValue("drycom_solid", false);
         }
 
         void OnDestroy ()
@@ -147,51 +198,61 @@ namespace RCSBuildAid
 
         void Save ()
         {
-            foreach (string name in resourceCfg.Keys) {
-                Settings.SetValue ("drycom_" + name, resourceCfg [name]);
+            Settings.SetValue ("drycom_other", DryCoM_Marker.other);
+            Settings.SetValue ("drycom_fuel", DryCoM_Marker.fuel);
+            Settings.SetValue ("drycom_solid", DryCoM_Marker.solid);
+            Settings.SetValue ("drycom_mono", DryCoM_Marker.monoprop);
+        }
+
+        void LateUpdate ()
+        {
+            DCoM_position = Vector3.zero;
+            partMass = 0f;
+
+            if (EditorLogic.startPod == null) {
+                return;
             }
-        }
 
-        protected override Vector3 UpdatePosition ()
-        {
-            resourceMass.Clear ();
-            return base.UpdatePosition ();
-        }
-
-        protected override void calculateCoM (Part part)
-        {
-            float mass = part.mass;
-
-            /* add resource mass */
-            IEnumerator<PartResource> enm = (IEnumerator<PartResource>)part.Resources.GetEnumerator();
-            while (enm.MoveNext()) {
-                PartResource res = enm.Current;
-                if (res.info.density == 0) {
-                    continue;
-                }
-                float rMass = (float)res.maxAmount * res.info.density;
-                if (!resourceMass.ContainsKey(res.info.name)) {
-                    resourceMass[res.info.name] = rMass;
-                } else {
-                    resourceMass[res.info.name] += rMass;
-                }
-
-                bool addResource;
-                if (!resourceCfg.TryGetValue (res.info.name, out addResource)) {
-                    string configName = "drycom_" + res.info.name;
-                    /* if the resource starts empty, default to false */
-                    addResource = Settings.GetValue(configName, res.amount == 0 ? false : true);
-                    resourceCfg[res.info.name] = addResource;
-                }
-                if (addResource) {
-                    mass += rMass;
+            recursePart (EditorLogic.startPod);
+            if (EditorLogic.SelectedPart != null) {
+                Part part = EditorLogic.SelectedPart;
+                if (part.potentialParent != null) {
+                    recursePart (part);
+                    foreach (Part p in part.symmetryCounterparts) {
+                        recursePart (p);
+                    }
                 }
             }
 
-            vectorSum += (part.transform.position 
-                + part.transform.rotation * part.CoMOffset)
-                * mass;
-            totalMass += mass;
+            transform.position = DCoM_position / partMass;
+            dryMass = partMass;
+        }
+
+        void recursePart (Part part)
+        {
+            if (part.physicalSignificance == Part.PhysicalSignificance.FULL) {
+                float mass = part.mass;
+                foreach (PartResource res in part.Resources) {
+                    bool addResource;
+                    if (resources.TryGetValue (res.info.id, out addResource)) {
+                        if (addResource) {
+                            mass += (float)res.amount * res.info.density;
+                        }
+                    } else if (other) {
+                        mass += (float)res.amount * res.info.density;
+                    }
+                }
+
+                DCoM_position += (part.transform.position 
+                    + part.transform.rotation * part.CoMOffset)
+                    * mass;
+                partMass += mass;
+            }
+           
+            foreach (Part p in part.children) {
+                recursePart (p);
+            }
         }
     }
 }
+
